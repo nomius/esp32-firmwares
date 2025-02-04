@@ -1,0 +1,6 @@
+cherrypy
+cherrypy_cors
+requests
+pycryptodome
+midea
+
