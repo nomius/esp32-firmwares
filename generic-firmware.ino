@@ -244,18 +244,22 @@ void loop() {
 #ifdef SR501_SENSOR
 	DetectSR501Movement();
 #endif
-#ifdef WEB_SERVER
+#ifdef WEB_SERVER && !HTTP_REPORTING_API
 	server.handleClient();
 #endif
+#ifdef HTTP_REPORTING_API && !WEB_SERVER
+	HandleClimateSensors();
+#endif
+
 }
 
 #ifdef HTTP_REPORTING_API
-void ReportSensorStateChange(char *state)
+void ReportSensorStateChange(char *event_type, char *state)
 {
 	HTTPClient httpc;
 	String serverPath = "http://" + String(servername) + ":" + String(serverport) + "/api/endpoint?device=" + String(hostname);
 	uint8_t json_data[128];
-	sprintf((char *)json_data, "{\n  \"device\": \"%s\",\n  \"state\" :  \"%s\"\n}", hostname, state);
+	sprintf((char *)json_data, "{\n  \"device\": \"%s\",\n  \"event_type\" : \"%s\",\n \"state\" :  \"%s\"\n}", hostname, event_type, state);
 	DEBUG_PRINTLN("Sending state to server:\n" + String((char*)json_data));
 	httpc.begin(serverPath.c_str());
 	int httpResponseCode = httpc.POST(json_data, strlen((char *)json_data));
@@ -281,7 +285,7 @@ void DetectSR501Movement(void)
 		if (sr501_state == LOW) {
 			DEBUG_PRINTLN("Motion detected!");
 			sr501_state = HIGH; // update variable state to HIGH
-			ReportSensorStateChange("Motion detected");
+			ReportSensorStateChange("movement", "Motion detected");
 		}
 	}
 	else {
@@ -290,7 +294,7 @@ void DetectSR501Movement(void)
 		if (sr501_state == HIGH){
 			DEBUG_PRINTLN("Motion stopped!");
 			sr501_state = LOW; // update variable state to LOW
-			ReportSensorStateChange("Motion stopped");
+			ReportSensorStateChange("movement", "Motion stopped");
 		}
 	}
 	delay(500);
@@ -384,3 +388,32 @@ String SendJSON(String something)
 	return String((char *)json_data);
 }
 #endif
+
+#ifdef HTTP_REPORTING_API && !WEB_SERVER
+void HandleClimateSensors(void)
+{
+#ifdef DS18B20_SENSOR
+	float temperatureC = ReadTempFromDS18B20();
+	DEBUG_PRINTLN("Temperature from DS18B20 (" + String(oneWireBus) + "): " + String(temperatureC));
+	ReportSensorStateChange("climate", String(temperatureC));
+#endif
+
+#ifdef DHT_SENSOR
+	TempAndHumidity data = dht.getTempAndHumidity();
+	if (isnan(data.temperature) || isnan(data.humidity)) {
+		DEBUG_PRINTLN("Failed to read from DHT sensor (" + String(pinDHT) + ")!");
+	}
+	else {
+		DEBUG_PRINT("Temperature: ");
+		DEBUG_PRINTLN(data.temperature);
+		DEBUG_PRINT("Humidity: ");
+		DEBUG_PRINTLN(data.humidity);
+		ReportSensorStateChange("climate", String(data.temperature));
+		ReportSensorStateChange("humidity", String(data.humidity));
+	}
+#endif
+	/* Wait 5 minutes */
+	delay(300000);
+}
+#endif
+
