@@ -2,10 +2,12 @@
 
 import cherrypy
 import json
-import sqlite3
 import time
 import requests
 from threading import Thread
+
+from datalayer import cur, conn
+
 from midea.client import client as midea_client
 from midea.device import air_conditioning_device as ac
 
@@ -15,7 +17,7 @@ current_tuya_token = ""
 
 def iot_thread_function():
     while True:
-        UpdateTuyaData()
+        #UpdateTuyaData()
         UpdateMideaACData("carrier")
         time.sleep(300)
 
@@ -51,10 +53,6 @@ def UpdateTuyaData():
         discovery_response = discovery_response.json()
 
         """Insert data into the SQLite database."""
-        db = 'data.db'
-        conn = sqlite3.connect(db)
-        cursor = conn.cursor()
-
         for device in discovery_response["payload"]["devices"]:
             event_type = device["dev_type"]
             if event_type == "climate":
@@ -66,9 +64,8 @@ def UpdateTuyaData():
             else:
                 continue
             date_epoch = int(time.time())
-            cursor.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name, event_type, date_epoch, state,))
-        conn.commit()
-        conn.close()
+            cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name, event_type, date_epoch, state,))
+            conn.commit()
         return
     except Exception as e:
         print('An exception occurred: {}'.format(e))
@@ -88,13 +85,9 @@ def UpdateMideaACData(name):
         date_epoch = int(time.time())
 
         """Insert data into the SQLite database."""
-        db = 'data.db'
-        conn = sqlite3.connect(db)
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-indoor", "climate", date_epoch, indoor_temperature,))
-        cursor.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-outdoor", "climate", date_epoch, outdoor_temperature,))
+        cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-indoor", "climate", date_epoch, indoor_temperature,))
+        cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-outdoor", "climate", date_epoch, outdoor_temperature,))
         conn.commit()
-        conn.close()
         return
 
     except Exception as e:
@@ -107,31 +100,11 @@ def SendAlert():
 
 @cherrypy.expose
 class EndpointRegister:
-    def __init__(self):
-        self.db = 'devices.db'
-        self.create_table()
-
-    def create_table(self):
-        """Creates the table if it doesn't exist."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS devices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ADDR TEXT,
-                NAME TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
 
     def get_data(self, name):
         """Fetch data from the SQLite database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('SELECT NAME, ADDR FROM devices WHERE NAME = ? ORDER BY id DESC LIMIT 1', (name,))
-        row = cursor.fetchone()
-        conn.close()
+        cur.execute('SELECT NAME, ADDR FROM devices WHERE NAME = ? ORDER BY id DESC LIMIT 1', (name,))
+        row = cur.fetchone()
         if row:
             return {"name": row[0], "addr" : row[1]}
         return {"message": "No data found"}
@@ -139,27 +112,18 @@ class EndpointRegister:
     # TODO: Add a control to check if name doesn't exist yet
     def set_data(self, addr, name):
         """Insert data into the SQLite database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO devices (ADDR, NAME) VALUES (?, ?)', (addr,name,))
+        cur.execute('INSERT INTO devices (ADDR, NAME) VALUES (?, ?)', (addr,name,))
         conn.commit()
-        conn.close()
     
     def update_data(self, addr, name):
         """Update the most recent record in the database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('UPDATE devices SET ADDR = ? WHERE NAME = ?', (addr, name,))
+        cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ?', (addr, name,))
         conn.commit()
-        conn.close()
 
     def delete_data(self, name):
         """Delete all records in the database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM devices WHERE NAME = ?', (name,))
+        cur.execute('DELETE FROM devices WHERE NAME = ?', (name,))
         conn.commit()
-        conn.close()
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
@@ -200,77 +164,45 @@ class EndpointRegister:
 
 @cherrypy.expose
 class EndpointData:
-    def __init__(self):
-        self.db = 'data.db'
-        self.create_table()
-
-    def create_table(self):
-        """Creates the table if it doesn't exist."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS devices_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                DEVICE_NAME TEXT,
-                EVENT_TYPE TEXT,
-                DATE_EPOCH INTEGER,
-                STATE TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
 
     def get_data(self, device_name, event_type="%", date_from=-1, date_to=-1):
         """Fetch data from the SQLite database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
         if date_from > 0 and date_to > 0:
-            cursor.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH BETWEEN ? AND ? ORDER BY id DESC', (device_name, event_type, date_from, date_to,))
+            cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH BETWEEN ? AND ? ORDER BY id DESC', (device_name, event_type, date_from, date_to,))
         elif date_from > 0:
-            cursor.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH >= ? ORDER BY id DESC', (device_name, event_type, date_from,))
+            cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH >= ? ORDER BY id DESC', (device_name, event_type, date_from,))
         elif date_to > 0:
-            cursor.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH <= ? ORDER BY id DESC', (device_name, event_type, date_to,))
+            cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH <= ? ORDER BY id DESC', (device_name, event_type, date_to,))
         else:
-            cursor.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? ORDER BY id DESC', (device_name,event_type,))
+            cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? ORDER BY id DESC', (device_name,event_type,))
 
-        rows = cursor.fetchall()
-        conn.close()
+        rows = cur.fetchall()
         if rows:
             return ( [dict(ix) for ix in rows] )
         return {"message": "No data found"}
 
     def set_data(self, device_name, event_type, state, date_epoch):
         """Insert data into the SQLite database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (device_name, event_type, date_epoch, state,))
+        cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (device_name, event_type, date_epoch, state,))
         conn.commit()
-        conn.close()
     
     # I don't find this very useful for now... But let's implement this anyways.
     def update_data(self, device_name, event_type, date_epoch, state):
         """Update the most recent record in the database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-        cursor.execute('UPDATE devices_data SET STATE = ?, EVENT_TYPE = ? WHERE DEVICE_NAME = ? AND DATE_EPOCH = ?', (state, event_type, device_name, date_epoch,))
+        cur.execute('UPDATE devices_data SET STATE = ?, EVENT_TYPE = ? WHERE DEVICE_NAME = ? AND DATE_EPOCH = ?', (state, event_type, device_name, date_epoch,))
         conn.commit()
-        conn.close()
 
     def delete_data(self, device_name, event_type="%", date_from=-1, date_to=-1):
         """Delete all records in the database."""
-        conn = sqlite3.connect(self.db)
-        cursor = conn.cursor()
-
         if date_from > 0 and date_to > 0:
-            cursor.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH BETWEEN ? AND ?', (device_name, event_type, date_from, date_to,))
+            cur.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH BETWEEN ? AND ?', (device_name, event_type, date_from, date_to,))
         elif date_from > 0:
-            cursor.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH >= ?', (device_name, event_type, date_from,))
+            cur.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH >= ?', (device_name, event_type, date_from,))
         elif date_to > 0:
-            cursor.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH <= ?', (device_name, event_type, date_to,))
+            cur.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH <= ?', (device_name, event_type, date_to,))
         else:
-            cursor.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ?', (device_name,event_type,))
+            cur.execute('DELETE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ?', (device_name,event_type,))
         conn.commit()
-        conn.close()
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
@@ -355,5 +287,7 @@ if __name__ == '__main__':
 
     cherrypy.engine.start()
     cherrypy.engine.block()
+    thread.interrupt()
     thread.join()
+    conn.close()
 
