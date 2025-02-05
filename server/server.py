@@ -96,7 +96,7 @@ def UpdateMideaACData(name):
 
 
 def SendAlert():
-    print("Alerting functionality not yet implemented")
+    True
 
 @cherrypy.expose
 class EndpointRegister:
@@ -178,7 +178,10 @@ class EndpointData:
 
         rows = cur.fetchall()
         if rows:
-            return ( [dict(ix) for ix in rows] )
+            ret_data = []
+            for item in rows:
+                ret_data.append({ "device_name" : item[0], "event_type" : item[1], "event_time" : item[2], "event_data" : item[3]})
+            return ret_data
         return {"message": "No data found"}
 
     def set_data(self, device_name, event_type, state, date_epoch):
@@ -208,11 +211,13 @@ class EndpointData:
     @cherrypy.tools.json_out()
     def GET(self, **params):
         device_name = params.get('device_name')
+        event_type = params.get('event_type')
         date_from = params.get('date_from')
         date_to = params.get('date_to')
-        if date_from == "": date_from = None
-        if date_to == "": date_to = None
-        return self.get_data(device_name, date_from, date_to)
+        if not date_from: date_from = -1
+        if not date_to: date_to = -1
+        if not event_type: event_type = '%'
+        return self.get_data(device_name, event_type, date_from, date_to)
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
@@ -224,8 +229,9 @@ class EndpointData:
         state = input_json['state']
         alert = input_json['alert']
         date_epoch = int(time.time())
-        if alert and alert == "True":
-            SendAlert()
+        if alert != None:
+            if alert == "True":
+                SendAlert()
         if device_name and state:
             self.set_data(device_name, event_type, state, date_epoch)
             return json.dumps({"status": "success", "message": "Data added"})
@@ -242,6 +248,10 @@ class EndpointData:
         state = input_json['state']
         alert = input_json['alert']
         date_epoch = int(time.time())
+        if alert != None:
+            if alert == "True":
+                SendAlert()
+
         if device_name and state:
             self.update_data(device_name, date_epoch, state)
             return {"status": "success", "message": "Data updated"}
