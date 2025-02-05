@@ -2,9 +2,11 @@
 #define DHT_SENSOR             /* Defines if should build code for the DHT type temperature & humidity sensors */
 #define SR501_SENSOR           /* Defines if should build code for the SR501 movement sensor */
 
-#define WEB_SERVER             /* Defines if the code should build a web server, comment it out if not needed*/
+//#define WEB_SERVER             /* Defines if the code should build a web server, comment it out if not needed*/
 #define HTTP_ENDPOINT_REGISTER /* Defines if should build code to register an HTTP endpoint. See function RegisterEndpoint */
 #define HTTP_REPORTING_API     /* Defines if reporting API should be built. This doesn't cause anything but a bigger firmware */
+
+#define SR501_SENSOR_ONLY_MOVEMENT /* Comment this if not only want movement reporting, but also when movement has stopped for the SR501 sensor */
 
 
 /* TODO: I should fix this by instead of doing all this bunch of ifdefs within one file split into multiples */
@@ -20,7 +22,7 @@
 #include <WebServer.h>
 #endif
 
-#ifdef HTTP_ENDPOINT_REGISTER || HTTP_REPORTING_API
+#if defined(HTTP_ENDPOINT_REGISTER) || defined(HTTP_REPORTING_API)
 #include <HTTPClient.h>
 #endif
 
@@ -39,7 +41,7 @@
 const char *ssid = "";          /* Wifi Access Point ESSID */
 const char *password = "";      /* Wifi Access Point ESSID WPA2 password */
 const char *hostname = "";      /* How you want the ESP32 to register as */
-const char *servername = "";    /* When using HTTP_ENDPOINT_REGISTER or HTTP_REPORTING_API this is required, as it's the API/server endpoint */
+const char *servername = "";    /* When using HTTP_ENDPOINT_REGISTER or HTTP_REPORTING_API this is required, as it's the API/server endpoint hostname/ip */
 const char *serverport = "80";  /* When using HTTP_ENDPOINT_REGISTER or HTTP_REPORTING_API this is required, as it's the API/server endpoint listening port*/
 
 #ifdef WEB_SERVER
@@ -94,16 +96,16 @@ void RegisterEndpoint(String ip)
 	DEBUG_PRINTLN("Registering " + String(hostname) + " as " + ip);
 	String serverPath = "http://" + String(servername) + ":" + String(serverport) + "/api/register";
 	uint8_t json_data[128];
-	sprintf((char *)json_data, "{\n  \"addr\": \"%s\",\n  \"name\" :  \"%s\"\n}", hostname, ip);
+	sprintf((char *)json_data, "{\n  \"addr\": \"%s\",\n  \"name\" :  \"%s\"\n}", ip.c_str(), hostname);
+	DEBUG_PRINTLN("Sending registration data to server:\n" + String((char*)json_data));
 	httpc.begin(serverPath.c_str());
+	httpc.addHeader("Content-Type", "application/json");
 	int httpResponseCode = httpc.POST(json_data, strlen((char *)json_data));
 	if (httpResponseCode > 0) {
-		DEBUG_PRINT("HTTP Response code: ");
-		DEBUG_PRINT(httpResponseCode);
+		DEBUG_PRINTLN("HTTP Response code: " + String(httpResponseCode));
 	}
 	else {
-		DEBUG_PRINTLN("Error code: ");
-		DEBUG_PRINTLN(httpResponseCode);
+		DEBUG_PRINTLN("Error code: " + String(httpResponseCode));
 	}
 }
 
@@ -241,16 +243,27 @@ void setup() {
 
 /*You should modify from below */
 void loop() {
+	static int counter = 0;
 #ifdef SR501_SENSOR
 	DetectSR501Movement();
+	delay(500);
+	counter++;
+#else
+	counter = 600; /* If there's no SR501, just set the counter to 600 so we handle the climate sensors (if set) */
 #endif
-#ifdef WEB_SERVER && !HTTP_REPORTING_API
-	server.handleClient();
+#if defined(WEB_SERVER) && !defined(HTTP_REPORTING_API)
+	server.handleClient();  /* Hoping for the best... Need to test if handleClient is non-blocking, if not, all good, otherwise, I need some logic here to play with SR501 */
 #endif
-#ifdef HTTP_REPORTING_API && !WEB_SERVER
-	HandleClimateSensors();
+#if defined(HTTP_REPORTING_API) && !defined(WEB_SERVER)
+	if (counter == 1 || counter == 600) { /* 600 = counter increments every 0.5, so these are 300 seconds = 5 minutes */
+		HandleClimateSensors();
+		counter = 1;
+	}
 #endif
 
+#if (defined(DHT_SENSOR) || defined(DS18B20_SENSOR)) && !defined(SR501_SENSOR)  /* If there's no SR501 sensor, we just wait 5 minutes */
+	delay(300000);
+#endif
 }
 
 #ifdef HTTP_REPORTING_API
@@ -259,17 +272,16 @@ void ReportSensorStateChange(char *event_type, char *state)
 	HTTPClient httpc;
 	String serverPath = "http://" + String(servername) + ":" + String(serverport) + "/api/endpoint?device=" + String(hostname);
 	uint8_t json_data[128];
-	sprintf((char *)json_data, "{\n  \"device\": \"%s\",\n  \"event_type\" : \"%s\",\n \"state\" :  \"%s\"\n}", hostname, event_type, state);
+	sprintf((char *)json_data, "{\n  \"device_name\": \"%s\",\n  \"event_type\" : \"%s\",\n  \"alert\" : \"%s\",\n  \"state\" :  \"%s\"\n}", hostname, event_type, "False", state);
 	DEBUG_PRINTLN("Sending state to server:\n" + String((char*)json_data));
 	httpc.begin(serverPath.c_str());
+	httpc.addHeader("Content-Type", "application/json");
 	int httpResponseCode = httpc.POST(json_data, strlen((char *)json_data));
 	if (httpResponseCode > 0) {
-		DEBUG_PRINT("HTTP Response code: ");
-		DEBUG_PRINTLN(httpResponseCode);
+		DEBUG_PRINTLN("HTTP Response code: " + String(httpResponseCode));
 	}
 	else {
-		DEBUG_PRINT("Error code: ");
-		DEBUG_PRINTLN(httpResponseCode);
+		DEBUG_PRINT("Error code: " + String(httpResponseCode));
 	}
 }
 #endif
@@ -294,7 +306,9 @@ void DetectSR501Movement(void)
 		if (sr501_state == HIGH){
 			DEBUG_PRINTLN("Motion stopped!");
 			sr501_state = LOW; // update variable state to LOW
+#if !defined(SR501_SENSOR_ONLY_MOVEMENT)
 			ReportSensorStateChange("movement", "Motion stopped");
+#endif
 		}
 	}
 	delay(500);
@@ -389,12 +403,14 @@ String SendJSON(String something)
 }
 #endif
 
-#ifdef HTTP_REPORTING_API && !WEB_SERVER
+#if defined(HTTP_REPORTING_API) && !defined(WEB_SERVER)
 void HandleClimateSensors(void)
 {
+	char fdata[4];
 #ifdef DS18B20_SENSOR
 	float temperatureC = ReadTempFromDS18B20();
 	DEBUG_PRINTLN("Temperature from DS18B20 (" + String(oneWireBus) + "): " + String(temperatureC));
+	sprintf(fdata, "%.1f", temperatureC);
 	ReportSensorStateChange("climate", String(temperatureC));
 #endif
 
@@ -408,12 +424,11 @@ void HandleClimateSensors(void)
 		DEBUG_PRINTLN(data.temperature);
 		DEBUG_PRINT("Humidity: ");
 		DEBUG_PRINTLN(data.humidity);
-		ReportSensorStateChange("climate", String(data.temperature));
-		ReportSensorStateChange("humidity", String(data.humidity));
+		sprintf(fdata, "%.1f", data.temperature);
+		ReportSensorStateChange("climate", fdata);
+		sprintf(fdata, "%.1f", data.humidity);
+		ReportSensorStateChange("humidity", fdata);
 	}
 #endif
-	/* Wait 5 minutes */
-	delay(300000);
 }
 #endif
-
