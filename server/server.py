@@ -96,7 +96,7 @@ def UpdateMideaACData(name):
 
 
 def SendAlert():
-    True
+    print("Alerting functionality not yet implemented")
 
 @cherrypy.expose
 class EndpointRegister:
@@ -220,13 +220,14 @@ class EndpointData:
     def POST(self, **params):
         input_json = cherrypy.request.json
         device_name = input_json['device_name']
-        date_epoch = int(time.time())
+        event_type = input_json['event_type']
         state = input_json['state']
         alert = input_json['alert']
-        if alert != "" and alert != None:
+        date_epoch = int(time.time())
+        if alert and alert == "True":
             SendAlert()
         if device_name and state:
-            self.set_data(device_name, state, date_epoch)
+            self.set_data(device_name, event_type, state, date_epoch)
             return json.dumps({"status": "success", "message": "Data added"})
         return {"status": "error", "message": "No information provided"}
 
@@ -237,9 +238,10 @@ class EndpointData:
     def PUT(self, **params):
         input_json = cherrypy.request.json
         device_name = input_json['device_name']
-        date_epoch = int(time.time())
+        event_type = input_json['event_type']
         state = input_json['state']
-
+        alert = input_json['alert']
+        date_epoch = int(time.time())
         if device_name and state:
             self.update_data(device_name, date_epoch, state)
             return {"status": "success", "message": "Data updated"}
