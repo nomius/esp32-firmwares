@@ -109,11 +109,16 @@ class EndpointRegister:
             return {"name": row[0], "addr" : row[1]}
         return {"message": "No data found"}
 
-    # TODO: Add a control to check if name doesn't exist yet
     def set_data(self, addr, name):
         """Insert data into the SQLite database."""
-        cur.execute('INSERT INTO devices (ADDR, NAME) VALUES (?, ?)', (addr,name,))
-        conn.commit()
+        ret = self.get_data(name)
+        if not ret.get('name'):
+            cur.execute('INSERT INTO devices (ADDR, NAME) VALUES (?, ?)', (addr,name,))
+            conn.commit()
+            return True
+        else:
+            print("Device: " + name + " already exists")
+            return False
     
     def update_data(self, addr, name):
         """Update the most recent record in the database."""
@@ -139,8 +144,12 @@ class EndpointRegister:
         addr = input_json['addr']
         name = input_json['name']
         if name and addr:
-            self.set_data(addr, name)
-            return {"status": "success", "message": "Data added"}
+            if self.set_data(addr, name):
+                cherrypy.response.status = 201
+                return {"status": "success", "message": "Data added"}
+            else:
+                cherrypy.response.status = 200
+                return {"status": "success", "message": "Device already registered"}
         return {"status": "error", "message": "No information provided"}
 
     @cherrypy.expose
@@ -285,6 +294,7 @@ if __name__ == '__main__':
     }
 
     time.sleep(1)
+    # TODO: Handle better threading with cherrypy
     thread = Thread(target = iot_thread_function, args = ())
     thread.start()
 
