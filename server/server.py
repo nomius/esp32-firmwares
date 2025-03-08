@@ -17,7 +17,7 @@ current_tuya_token = ""
 
 def iot_thread_function():
     while True:
-        #UpdateTuyaData()
+        UpdateTuyaData()
         UpdateMideaACData("carrier")
         time.sleep(300)
 
@@ -61,6 +61,9 @@ def UpdateTuyaData():
             elif event_type == "light":
                 name = device["name"]
                 state = device["data"]["state"]
+            elif event_type == "switch":
+                name = device["name"]
+                state = state = device["data"]["state"]
             else:
                 continue
             date_epoch = int(time.time())
