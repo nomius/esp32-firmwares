@@ -67,7 +67,20 @@ def UpdateTuyaData():
             else:
                 continue
             date_epoch = int(time.time())
-            cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name, event_type, date_epoch, state,))
+            source = "TUYA"
+            # TODO: use the expand API to get the device addr https://developer.tuya.com/en/docs/cloud/62e69f6d81?id=Kb65exx1cc47b
+            addr = "unknown"
+
+            # Let's save this one into the devices list first
+            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id DESC LIMIT 1', (name, source,))
+            row = cur.fetchone()
+            if row:
+                cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name, source,))
+            else:
+                cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE) VALUES (?, ?, ?)', (name, addr, source,))
+
+            # Let's save "the event"... I probably need to revisit this, specially for things that are not climate devices
+            cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name, event_type, date_epoch, state,))
             conn.commit()
         return
     except Exception as e:
@@ -75,6 +88,8 @@ def UpdateTuyaData():
         pass
 
 
+# Below function sucks...
+# TODO: I should probably move to midea-beautiful-air library
 def UpdateMideaACData(name):
     midea_client_mngr = midea_client(MIDEA_API_KEY, MIDEA_USERNAME, MIDEA_PASSWORD)
     midea_client_mngr.setup()
@@ -87,9 +102,30 @@ def UpdateMideaACData(name):
         outdoor_temperature = device.outdoor_temperature
         date_epoch = int(time.time())
 
-        """Insert data into the SQLite database."""
-        cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-indoor", "climate", date_epoch, indoor_temperature,))
-        cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-outdoor", "climate", date_epoch, outdoor_temperature,))
+        source = "Midea"
+        addr = "unknown"
+
+        # NOTE: These AC normally comes with two sensors, one for the indoor temperature and another one for the outdoor temperature.
+        #       I'll base myself on this so I'll add two items to the devices sensors and two items to the device data... For now.
+        # Let's save this one into the devices list first (indoor & outdoor)
+        cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id DESC LIMIT 1', (name + "-indoor", source,))
+        row = cur.fetchone()
+        if row:
+            cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name + "-indoor", source,))
+        else:
+            cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE) VALUES (?, ?, ?)', (name + "-indoor", addr, source,))
+
+        cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id DESC LIMIT 1', (name + "-outdoor", source,))
+        row = cur.fetchone()
+        if row:
+            cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name + "-outdoor", source,))
+        else:
+            cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE) VALUES (?, ?, ?)', (name + "-outdoor", addr, source,))
+
+        # Let's save "the event"... I probably need to revisit this, as with the tuya one anyways
+        cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-indoor", "climate", date_epoch, indoor_temperature,))
+        cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-outdoor", "climate", date_epoch, outdoor_temperature,))
+
         conn.commit()
         return
 
