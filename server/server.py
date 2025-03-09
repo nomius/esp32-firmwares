@@ -161,8 +161,8 @@ class EndpointRegister:
     def set_data(self, addr, name, source):
         """Insert data into the SQLite database."""
         ret = self.get_data(name, source)
-        if not ret.get('name'):
-            cur.execute('INSERT INTO devices (ADDR, NAME, SOURCE) VALUES (?, ?)', (addr, name, source,))
+        if type(ret) != list:
+            cur.execute('INSERT INTO devices (ADDR, NAME, SOURCE) VALUES (?, ?, ?)', (addr, name, source,))
             conn.commit()
             return True
         else:
