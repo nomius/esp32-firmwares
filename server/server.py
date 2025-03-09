@@ -76,9 +76,9 @@ def UpdateTuyaData():
             cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id DESC LIMIT 1', (name, source,))
             row = cur.fetchone()
             if row:
-                cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name, source,))
+                cur.execute('UPDATE devices SET ADDR = ?, LAST_PING = ? WHERE NAME = ? AND SOURCE = ?', (addr, date_epoch, name, source,))
             else:
-                cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE) VALUES (?, ?, ?)', (name, addr, source,))
+                cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE, LAST_PING) VALUES (?, ?, ?, ?)', (name, addr, source, date_epoch,))
 
             # Let's save "the event"... I probably need to revisit this, specially for things that are not climate devices
             cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name, event_type, date_epoch, state,))
@@ -112,16 +112,16 @@ def UpdateMideaACData(name):
         cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id DESC LIMIT 1', (name + "-indoor", source,))
         row = cur.fetchone()
         if row:
-            cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name + "-indoor", source,))
+            cur.execute('UPDATE devices SET ADDR = ?, LAST_PING = ? WHERE NAME = ? AND SOURCE = ?', (addr, date_epoch, name + "-indoor", source,))
         else:
-            cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE) VALUES (?, ?, ?)', (name + "-indoor", addr, source,))
+            cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE, LAST_PING) VALUES (?, ?, ?, ?)', (name + "-indoor", addr, source, date_epoch,))
 
         cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id DESC LIMIT 1', (name + "-outdoor", source,))
         row = cur.fetchone()
         if row:
-            cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name + "-outdoor", source,))
+            cur.execute('UPDATE devices SET ADDR = ?, LAST_PING = ? WHERE NAME = ? AND SOURCE = ?', (addr, date_epoch, name + "-outdoor", source,))
         else:
-            cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE) VALUES (?, ?, ?)', (name + "-outdoor", addr, source,))
+            cur.execute('INSERT INTO devices (NAME, ADDR, SOURCE, LAST_PING) VALUES (?, ?, ?)', (name + "-outdoor", addr, source, date_epoch,))
 
         # Let's save "the event"... I probably need to revisit this, as with the tuya one anyways
         cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-indoor", "climate", date_epoch, indoor_temperature,))
@@ -143,19 +143,19 @@ class EndpointRegister:
     def get_data(self, name, source):
         """Fetch data from the SQLite database."""
         if name and source:
-            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id', (name, source,))
+            cur.execute('SELECT NAME, ADDR, SOURCE, LAST_PING FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id', (name, source,))
         elif name:
-            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? ORDER BY id', (name,))
+            cur.execute('SELECT NAME, ADDR, SOURCE, LAST_PING FROM devices WHERE NAME = ? ORDER BY id', (name,))
         elif source:
-            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE SOURCE = ? ORDER BY id', (source,))
+            cur.execute('SELECT NAME, ADDR, SOURCE, LAST_PING FROM devices WHERE SOURCE = ? ORDER BY id', (source,))
         else:
-            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices ORDER BY id', ())
+            cur.execute('SELECT NAME, ADDR, SOURCE, LAST_PING FROM devices ORDER BY id', ())
 
         rows = cur.fetchall()
         if rows:
             ret_data = []
             for item in rows:
-                ret_data.append({ "name" : item[0], "addr" : item[1], "source" : item[2]})
+                ret_data.append({ "name" : item[0], "addr" : item[1], "source" : item[2], "last_ping" : item[3]})
             return ret_data
         return {"message": "No data found"}
 
@@ -163,15 +163,18 @@ class EndpointRegister:
         """Insert data into the SQLite database."""
         ret = self.get_data(name, source)
         if type(ret) != list:
-            cur.execute('INSERT INTO devices (ADDR, NAME, SOURCE) VALUES (?, ?, ?)', (addr, name, source,))
+            date_epoch = int(time.time())
+            cur.execute('INSERT INTO devices (ADDR, NAME, SOURCE, LAST_PING) VALUES (?, ?, ?, ?)', (addr, name, source, date_epoch,))
             conn.commit()
             return True
         else:
+            self.update_data(addr, name, source)
             return False
     
     def update_data(self, addr, name, source):
         """Update the most recent record in the database."""
-        cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name, source,))
+        date_epoch = int(time.time())
+        cur.execute('UPDATE devices SET ADDR = ?, LAST_PING = ? WHERE NAME = ? AND SOURCE = ?', (addr, date_epoch, name, source,))
         conn.commit()
 
     def delete_data(self, name, source):
@@ -249,12 +252,14 @@ class EndpointData:
     def set_data(self, device_name, event_type, state, date_epoch):
         """Insert data into the SQLite database."""
         cur.execute('INSERT INTO devices_data (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (device_name, event_type, date_epoch, state,))
+        cur.execute('UPDATE devices SET LAST_PING = ? WHERE NAME = ?', (date_epoch, device_name,))
         conn.commit()
     
     # I don't find this very useful for now... But let's implement this anyways.
     def update_data(self, device_name, event_type, date_epoch, state):
         """Update the most recent record in the database."""
         cur.execute('UPDATE devices_data SET STATE = ?, EVENT_TYPE = ? WHERE DEVICE_NAME = ? AND DATE_EPOCH = ?', (state, event_type, device_name, date_epoch,))
+        cur.execute('UPDATE devices SET LAST_PING = ? WHERE NAME = ?', (date_epoch, device_name,))
         conn.commit()
 
     def delete_data(self, device_name, event_type="%", date_from=-1, date_to=-1):
