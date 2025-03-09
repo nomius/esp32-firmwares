@@ -125,7 +125,6 @@ def UpdateMideaACData(name):
         # Let's save "the event"... I probably need to revisit this, as with the tuya one anyways
         cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-indoor", "climate", date_epoch, indoor_temperature,))
         cur.execute('INSERT INTO DEVICES_DATA (DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE) VALUES (?, ?, ?, ?)', (name + "-outdoor", "climate", date_epoch, outdoor_temperature,))
-
         conn.commit()
         return
 
@@ -140,40 +139,51 @@ def SendAlert():
 @cherrypy.expose
 class EndpointRegister:
 
-    def get_data(self, name):
+    def get_data(self, name, source):
         """Fetch data from the SQLite database."""
-        cur.execute('SELECT NAME, ADDR FROM devices WHERE NAME = ? ORDER BY id DESC LIMIT 1', (name,))
-        row = cur.fetchone()
-        if row:
-            return {"name": row[0], "addr" : row[1]}
+        if name and source:
+            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? AND SOURCE = ? ORDER BY id', (name, source,))
+        elif name:
+            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE NAME = ? ORDER BY id', (name,))
+        elif source:
+            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices WHERE SOURCE = ? ORDER BY id', (source,))
+        else:
+            cur.execute('SELECT NAME, ADDR, SOURCE FROM devices ORDER BY id', ())
+
+        rows = cur.fetchall()
+        if rows:
+            ret_data = []
+            for item in rows:
+                ret_data.append({ "name" : item[0], "addr" : item[1], "source" : item[2]})
+            return ret_data
         return {"message": "No data found"}
 
-    def set_data(self, addr, name):
+    def set_data(self, addr, name, source):
         """Insert data into the SQLite database."""
-        ret = self.get_data(name)
+        ret = self.get_data(name, source)
         if not ret.get('name'):
-            cur.execute('INSERT INTO devices (ADDR, NAME) VALUES (?, ?)', (addr,name,))
+            cur.execute('INSERT INTO devices (ADDR, NAME, SOURCE) VALUES (?, ?)', (addr, name, source,))
             conn.commit()
             return True
         else:
-            print("Device: " + name + " already exists")
             return False
     
-    def update_data(self, addr, name):
+    def update_data(self, addr, name, source):
         """Update the most recent record in the database."""
-        cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ?', (addr, name,))
+        cur.execute('UPDATE devices SET ADDR = ? WHERE NAME = ? AND SOURCE = ?', (addr, name, source,))
         conn.commit()
 
-    def delete_data(self, name):
+    def delete_data(self, name, source):
         """Delete all records in the database."""
-        cur.execute('DELETE FROM devices WHERE NAME = ?', (name,))
+        cur.execute('DELETE FROM devices WHERE NAME = ? AND SOURCE = ?', (name, source,))
         conn.commit()
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
     def GET(self, **params):
         name = params.get('name')
-        return self.get_data(name)
+        source = params.get('source')
+        return self.get_data(name, source)
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
@@ -182,8 +192,9 @@ class EndpointRegister:
         input_json = cherrypy.request.json
         addr = input_json['addr']
         name = input_json['name']
-        if name and addr:
-            if self.set_data(addr, name):
+        source = input_json['source']
+        if name and addr and source:
+            if self.set_data(addr, name, source):
                 cherrypy.response.status = 201
                 return {"status": "success", "message": "Data added"}
             else:
@@ -197,9 +208,10 @@ class EndpointRegister:
     def PUT(self, **params):
         addr = input_json['addr']
         name = input_json['name']
+        source = input_json['source']
 
-        if name and addr:
-            self.update_data(addr, name)
+        if name and addr and source:
+            self.update_data(addr, name, source)
             return {"status": "success", "message": "Data updated"}
         return {"status": "error", "message": "No information provided"}
 
@@ -207,7 +219,8 @@ class EndpointRegister:
     @cherrypy.tools.json_out()
     def DELETE(self, **params):
         name = params.get('name')
-        self.delete_data(name)
+        source = params.get('source')
+        self.delete_data(name, source)
         return {"status": "success", "message": "Data deleted"}
 
 @cherrypy.expose
@@ -222,7 +235,7 @@ class EndpointData:
         elif date_to > 0:
             cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? AND DATE_EPOCH <= ? ORDER BY id DESC', (device_name, event_type, date_to,))
         else:
-            cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? ORDER BY id DESC', (device_name,event_type,))
+            cur.execute('SELECT DEVICE_NAME, EVENT_TYPE, DATE_EPOCH, STATE FROM devices_data WHERE DEVICE_NAME = ? AND EVENT_TYPE like ? ORDER BY id DESC', (device_name, event_type,))
 
         rows = cur.fetchall()
         if rows:

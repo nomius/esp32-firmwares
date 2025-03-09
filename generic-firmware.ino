@@ -41,6 +41,7 @@
 const char *ssid = "";          /* Wifi Access Point ESSID */
 const char *password = "";      /* Wifi Access Point ESSID WPA2 password */
 const char *hostname = "";      /* How you want the ESP32 to register as */
+const char *location = "";      /* Where is this device physically located. You can just put esp32 if you want here */
 const char *servername = "";    /* When using HTTP_ENDPOINT_REGISTER or HTTP_REPORTING_API this is required, as it's the API/server endpoint hostname/ip */
 const char *serverport = "80";  /* When using HTTP_ENDPOINT_REGISTER or HTTP_REPORTING_API this is required, as it's the API/server endpoint listening port*/
 
@@ -96,7 +97,7 @@ void RegisterEndpoint(String ip)
 	DEBUG_PRINTLN("Registering " + String(hostname) + " as " + ip);
 	String serverPath = "http://" + String(servername) + ":" + String(serverport) + "/api/register";
 	uint8_t json_data[128];
-	sprintf((char *)json_data, "{\n  \"addr\": \"%s\",\n  \"name\" :  \"%s\"\n}", ip.c_str(), hostname);
+	sprintf((char *)json_data, "{\n  \"addr\": \"%s\",\n  \"name\":  \"%s\",\n  \"source\": \"%s\"\n}", ip.c_str(), hostname, location);
 	DEBUG_PRINTLN("Sending registration data to server:\n" + String((char*)json_data));
 	httpc.begin(serverPath.c_str());
 	httpc.addHeader("Content-Type", "application/json");
