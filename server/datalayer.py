@@ -20,7 +20,8 @@ class datalayer(object):
             CREATE TABLE IF NOT EXISTS devices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ADDR TEXT,
-                NAME TEXT
+                NAME TEXT,
+                SOURCE TEXT
             )
         ''')
         self._cur.execute('''
