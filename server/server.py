@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import cherrypy
 import json
 import time
@@ -334,15 +335,19 @@ class Root:
     er = EndpointRegister()
     ed = EndpointData()
 
-    @cherrypy.expose
-    def index(self):
-        return "Welcome to the CherryPy API with SQLite backend example!"
-
-# Configuring CherryPy
 if __name__ == '__main__':
 
+    PATH = os.path.abspath(os.path.dirname(__file__)) + '/ui'
     config = {
-        '/': { 'request.dispatch': cherrypy.dispatch.MethodDispatcher() }
+        '/': {
+            'request.dispatch': cherrypy.dispatch.MethodDispatcher()
+        },
+        '/ui': {
+            'tools.staticdir.on': True,
+            'tools.staticdir.dir': PATH,
+            'tools.staticdir.index': 'index.html',
+            'request.dispatch': cherrypy.dispatch.MethodDispatcher()
+        }
     }
 
     time.sleep(1)
